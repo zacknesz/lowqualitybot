@@ -1,5 +1,7 @@
 import telebot
 from telebot import types
+from flask import Flask
+import threading
 import json
 import os
 
@@ -282,4 +284,16 @@ def handle_media(message):
 
 # Ejecutar
 print("Bot corriendo...")
+
+app = Flask(__name__)
+
+@app.route('/')
+def home():
+    return 'Bot corriendo'
+
+def run_flask():
+    app.run(host='0.0.0.0', port=8000)
+
+# Inicia el servidor Flask en un hilo separado
+threading.Thread(target=run_flask).start()
 bot.polling()
