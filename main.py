@@ -1,271 +1,205 @@
 import telebot
 from telebot import types
+from flask import Flask
+from threading import Thread
 import json
 import os
 import time
-from flask import Flask
-import threading
-from threading import Thread
 
-BOT_TOKEN = "7745916264:AAFaxmVrQsqiEjq5yhq6BdDQ7wBKjjb4Gn8"
+BOT_TOKEN = "TU_TOKEN_AQUI"
 bot = telebot.TeleBot(BOT_TOKEN)
 admin = -1001862368664
 owner_id = 7967939255
 
-# Archivos
+# Archivos y almacenamiento
 BLACKLIST_FILE = 'blacklist.json'
 STATS_FILE = 'stats.json'
 PREMIUM_FILE = 'premium.json'
-PREMIUM_DAYS_FILE = 'premium_days.json'
 REFERRALS_FILE = 'referrals.json'
 ACCUMULATED_FILE = 'accumulated_days.json'
+PREMIUM_DAYS_FILE = 'premium_days.json'
 USERS_FILE = 'users.json'
 
-# Cargar datos
+# Cargar listas
 blacklist = json.load(open(BLACKLIST_FILE)) if os.path.exists(BLACKLIST_FILE) else []
 stats = json.load(open(STATS_FILE)) if os.path.exists(STATS_FILE) else {}
 premium_users = json.load(open(PREMIUM_FILE)) if os.path.exists(PREMIUM_FILE) else []
-premium_days = json.load(open(PREMIUM_DAYS_FILE)) if os.path.exists(PREMIUM_DAYS_FILE) else {}
 referrals = json.load(open(REFERRALS_FILE)) if os.path.exists(REFERRALS_FILE) else {}
 accumulated = json.load(open(ACCUMULATED_FILE)) if os.path.exists(ACCUMULATED_FILE) else {}
+premium_days = json.load(open(PREMIUM_DAYS_FILE)) if os.path.exists(PREMIUM_DAYS_FILE) else {}
 users = json.load(open(USERS_FILE)) if os.path.exists(USERS_FILE) else []
 
-# Guardar funciones
-def guardar_json(archivo, contenido):
-    json.dump(contenido, open(archivo, 'w'))
+# Guardar listas
+def guardar_blacklist(): json.dump(blacklist, open(BLACKLIST_FILE, 'w'))
+def guardar_stats(): json.dump(stats, open(STATS_FILE, 'w'))
+def guardar_premium(): json.dump(premium_users, open(PREMIUM_FILE, 'w'))
+def guardar_referrals(): json.dump(referrals, open(REFERRALS_FILE, 'w'))
+def guardar_accumulated(): json.dump(accumulated, open(ACCUMULATED_FILE, 'w'))
+def guardar_premium_days(): json.dump(premium_days, open(PREMIUM_DAYS_FILE, 'w'))
+def guardar_users(): json.dump(users, open(USERS_FILE, 'w'))
 
-def guardar_blacklist(): guardar_json(BLACKLIST_FILE, blacklist)
-def guardar_stats(): guardar_json(STATS_FILE, stats)
-def guardar_premium(): guardar_json(PREMIUM_FILE, premium_users)
-def guardar_premium_days(): guardar_json(PREMIUM_DAYS_FILE, premium_days)
-def guardar_referrals(): guardar_json(REFERRALS_FILE, referrals)
-def guardar_accumulated(): guardar_json(ACCUMULATED_FILE, accumulated)
-def guardar_users(): guardar_json(USERS_FILE, users)
-
-# Expirar premium automáticamente
+# Verificación de expiraciones
 def verificar_expiraciones():
     while True:
-        ahora = int(time.time())
-        expirados = []
-        for uid, ts in premium_days.items():
-            if ahora >= ts:
-                expirados.append(uid)
-        for uid in expirados:
-            if int(uid) in premium_users:
-                premium_users.remove(int(uid))
+        for uid in list(premium_days.keys()):
+            if premium_days[uid] <= int(time.time()):
+                if int(uid) in premium_users:
+                    premium_users.remove(int(uid))
+                    guardar_premium()
+                premium_days.pop(uid)
+                guardar_premium_days()
                 try:
                     bot.send_message(int(uid), "Tu suscripción premium ha expirado.")
-                except:
-                    pass
-                guardar_premium()
-        for uid in expirados:
-            del premium_days[uid]
-        guardar_premium_days()
-        time.sleep(60)
-
+                except: pass
+        time.sleep(3600)
 Thread(target=verificar_expiraciones).start()
 
 # Sesiones para edición de caption
 user_sessions = {}
 
-# Panel de administrador
-@bot.message_handler(commands=['panel'])
-def panel_admin(message):
-    if message.from_user.id != owner_id: return
-    markup = types.InlineKeyboardMarkup()
-    markup.row(
-        types.InlineKeyboardButton("Ver listas", callback_data="ver_listas"),
-        types.InlineKeyboardButton("Enviar broadcast", callback_data="broadcast")
-    )
-    bot.reply_to(message, "Panel de administración", reply_markup=markup)
-
-@bot.callback_query_handler(func=lambda call: call.data == "ver_listas")
-def ver_listas(call):
-    if call.from_user.id != owner_id: return
-
-    def mostrar(archivo, nombre):
-        try:
-            datos = json.load(open(archivo))
-            if not datos:
-                return f"• {nombre}: vacío"
-            contenido = json.dumps(datos, indent=2)
-            return f"• {nombre}:\n`{contenido}`"
-        except:
-            return f"• {nombre}: error al leer archivo"
-
-    mensaje = (
-        mostrar(ACCUMULATED_FILE, "Días acumulados") + "\n\n" +
-        mostrar(BLACKLIST_FILE, "Blacklist") + "\n\n" +
-        mostrar(PREMIUM_FILE, "Premium") + "\n\n" +
-        mostrar(PREMIUM_DAYS_FILE, "Vencimientos") + "\n\n" +
-        mostrar(REFERRALS_FILE, "Referidos") + "\n\n" +
-        mostrar(STATS_FILE, "Estadísticas")
-    )
-
-    markup = types.InlineKeyboardMarkup()
-    markup.add(types.InlineKeyboardButton("← Volver", callback_data="volver_panel"))
-    bot.send_message(call.message.chat.id, mensaje, parse_mode="Markdown", reply_markup=markup)
-
-@bot.callback_query_handler(func=lambda call: call.data == "volver_panel")
-def volver_panel(call):
-    panel_admin(call.message)
-
-@bot.callback_query_handler(func=lambda call: call.data == "broadcast")
-def iniciar_broadcast(call):
-    if call.from_user.id != owner_id: return
-    msg = bot.send_message(call.message.chat.id, "Escribe el mensaje que deseas enviar a todos los usuarios:")
-    bot.register_next_step_handler(msg, enviar_broadcast)
-
-def enviar_broadcast(message):
-    if message.from_user.id != owner_id: return
-    texto = message.text
-    bloqueados = 0
-    for uid in users:
-        try:
-            bot.send_message(uid, texto)
-        except:
-            bloqueados += 1
-    bot.reply_to(message, f"Broadcast enviado. Usuarios bloqueados: {bloqueados}")
-
-# Registro de usuarios
-@bot.message_handler(func=lambda m: True)
-def registrar_usuario(message):
-    if message.from_user.id not in users:
-        users.append(message.from_user.id)
-        guardar_users()
-
 # Comando /start con sistema de referidos
 @bot.message_handler(commands=['start'])
-def send_welcome(message):
-    user_id = str(message.from_user.id)
-    text = message.text
-    bienvenida = f"Hola, @{message.from_user.username or message.from_user.first_name}.\nBienvenido a @LowQualityContentBot. Envía un meme y será enviado a los admins para posteriormente publicarlo en el canal."
+def registrar_usuario(message):
+    uid = message.from_user.id
+    if uid not in users:
+        users.append(uid)
+        guardar_users()
 
-    # Procesar referido si viene con parámetro
-    parts = text.split()
-    if len(parts) > 1:
-        ref_id = parts[1]
-        if ref_id != user_id and user_id not in referrals:
-            referrals.setdefault(ref_id, 0)
-            referrals[ref_id] += 1
-            guardar_referrals()
+    argumentos = message.text.split()
+    if len(argumentos) > 1:
+        referidor = argumentos[1]
+        if str(uid) == referidor:
+            bot.reply_to(message, "No puedes referirte a ti mismo.")
+            return
+        if str(uid) in referrals:
+            bot.reply_to(message, "Ya fuiste referido por alguien.")
+            return
+        if int(referidor) in blacklist:
+            bot.reply_to(message, "Este referidor no es válido.")
+            return
+        referrals[str(uid)] = referidor
+        guardar_referrals()
 
-            # Acumular días
-            accumulated_days.setdefault(ref_id, 0)
-            if referrals[ref_id] % 5 == 0:
-                accumulated_days[ref_id] += 1
-                guardar_days()
+        accumulated[referidor] = accumulated.get(referidor, 0) + 1
+        guardar_accumulated()
 
-    bot.reply_to(message, bienvenida)
+        total = accumulated.get(referidor, 0)
+        if total % 5 == 0:
+            premium_users.append(int(referidor))
+            guardar_premium()
+            premium_days[referidor] = int(time.time()) + 86400  # 1 día
+            guardar_premium_days()
+            try:
+                bot.send_message(int(referidor), "¡Has recibido 1 día de premium por tus referidos!")
+            except: pass
 
-# Comando para ver referidos y días acumulados
+    bot.reply_to(message, "¡Bienvenido al bot!")
+
+# /referrals
 @bot.message_handler(commands=['referrals'])
-def mostrar_referidos(message):
+def mostrar_referrals(message):
     uid = str(message.from_user.id)
-    num_ref = referrals.get(uid, 0)
-    dias = accumulated_days.get(uid, 0)
-    enlace = f"https://t.me/LowQualityContentBot?start={uid}"
-    msg = (
-        f"**Sistema de Referidos**\n\n"
-        f"• Referidos: `{num_ref}`\n"
-        f"• Días acumulados: `{dias}`\n"
-        f"• Enlace para invitar: [Click aquí]({enlace})"
-    )
-    bot.reply_to(message, msg, parse_mode="Markdown")
+    cantidad = sum(1 for v in referrals.values() if v == uid)
+    dias = accumulated.get(uid, 0)
+    link = f"https://t.me/LowQualityContentBot?start={uid}"
+    texto = f"Has referido a {cantidad} usuarios.\nDías premium acumulados: {dias}\nComparte este link para conseguir más: {link}"
+    bot.reply_to(message, texto)
 
+# /canjear [n]
 @bot.message_handler(commands=['canjear'])
 def canjear_dias(message):
     uid = str(message.from_user.id)
-    if uid not in accumulated_days:
-        bot.reply_to(message, "No tienes días acumulados para canjear.")
-        return
+    args = message.text.split()
+    dias = accumulated.get(uid, 0)
 
-    partes = message.text.split()
-    disponibles = accumulated_days.get(uid, 0)
-
-    if len(partes) == 1:
-        cantidad = disponibles
-    else:
-        try:
-            cantidad = int(partes[1])
-            if cantidad <= 0:
-                raise ValueError()
-        except:
-            return bot.reply_to(message, "Uso: /canjear o /canjear [número de días]")
-
-    if disponibles < cantidad:
-        return bot.reply_to(message, f"No tienes suficientes días. Actualmente tienes `{disponibles}`.", parse_mode="Markdown")
-
-    accumulated_days[uid] -= cantidad
-    guardar_days()
-
-    if message.from_user.id not in premium_users:
-        premium_users.append(message.from_user.id)
+    if len(args) == 1:
+        if dias == 0:
+            bot.reply_to(message, "No tienes días premium acumulados.")
+            return
+        premium_users.append(int(uid))
         guardar_premium()
-
-    bot.reply_to(message, f"¡Has canjeado `{cantidad}` día(s) premium!", parse_mode="Markdown")
-
-@bot.message_handler(commands=['giftpremium'])
-def gift_premium(message):
-    partes = message.text.split()
-    uid_emisor = str(message.from_user.id)
-
-    if len(partes) < 3:
-        return bot.reply_to(message,
-            "Uso: `/giftpremium @usuario cantidad` o `/giftpremium user_id cantidad`\n\n"
-            "Ejemplo: `/giftpremium @pepito 2`",
-            parse_mode="Markdown"
-        )
-
-    objetivo = partes[1]
-    try:
-        cantidad = int(partes[2])
-        if cantidad <= 0:
-            raise ValueError
-    except:
-        return bot.reply_to(message, "La cantidad debe ser un número mayor a cero.")
-
-    disponibles = accumulated_days.get(uid_emisor, 0)
-    if disponibles < cantidad:
-        return bot.reply_to(message, f"No tienes suficientes días. Disponibles: `{disponibles}`", parse_mode="Markdown")
-
-    # Buscar por @username
-    if objetivo.startswith('@'):
-        found = False
-        for user in bot.get_chat_administrators(admin):
-            if user.user.username == objetivo[1:]:
-                receptor_id = user.user.id
-                found = True
-                break
-        if not found:
-            return bot.reply_to(message, "No se encontró ese @username. Asegúrate de que el usuario haya iniciado el bot.")
-    else:
+        premium_days[uid] = int(time.time()) + dias * 86400
+        accumulated.pop(uid)
+        guardar_accumulated()
+        guardar_premium_days()
+        bot.reply_to(message, f"Has canjeado {dias} día(s) premium.")
+    elif len(args) == 2:
         try:
-            receptor_id = int(objetivo)
+            n = int(args[1])
+            if n <= 0 or dias < n:
+                return bot.reply_to(message, "No tienes suficientes días.")
+            premium_users.append(int(uid))
+            guardar_premium()
+            premium_days[uid] = int(time.time()) + n * 86400
+            accumulated[uid] -= n
+            if accumulated[uid] == 0:
+                accumulated.pop(uid)
+            guardar_accumulated()
+            guardar_premium_days()
+            bot.reply_to(message, f"Has canjeado {n} día(s) premium.")
         except:
-            return bot.reply_to(message, "ID inválido.")
+            bot.reply_to(message, "Uso: /canjear o /canjear 1")
 
-    # Transferir días
-    accumulated_days[uid_emisor] -= cantidad
-    accumulated_days[str(receptor_id)] = accumulated_days.get(str(receptor_id), 0) + cantidad
-    guardar_todo()
+# /premiumstatus
+@bot.message_handler(commands=['premiumstatus'])
+def estado_premium(message):
+    uid = str(message.from_user.id)
+    if int(uid) in premium_users:
+        dias_restantes = max((premium_days.get(uid, 0) - int(time.time())) // 86400, 0)
+        bot.reply_to(message, f"Eres usuario premium.\nDías restantes: {dias_restantes}")
+    else:
+        bot.reply_to(message, "No eres usuario premium.")
 
-    bot.reply_to(message,
-        f"Regalaste `{cantidad}` día(s) premium a [usuario](tg://user?id={receptor_id})",
-        parse_mode="Markdown")
+# /giftpremium @username X ó /giftpremium ID X
+@bot.message_handler(commands=['giftpremium'])
+def regalar_premium(message):
+    args = message.text.split()
+    if len(args) != 3:
+        return bot.reply_to(message, "Uso: /giftpremium @username 1 o /giftpremium ID 1")
+
+    destino = args[1]
     try:
-        bot.send_message(receptor_id,
-            f"¡Has recibido `{cantidad}` día(s)` premium de [usuario](tg://user?id={message.from_user.id})!",
-            parse_mode="Markdown")
+        dias = int(args[2])
+        if dias <= 0:
+            raise ValueError()
     except:
-        pass
+        return bot.reply_to(message, "Días inválidos.")
+
+    remitente = str(message.from_user.id)
+    if accumulated.get(remitente, 0) < dias:
+        return bot.reply_to(message, "No tienes suficientes días acumulados.")
+
+    if destino.startswith("@"):
+        try:
+            usuario = bot.get_chat(destino)
+            uid = str(usuario.id)
+        except:
+            return bot.reply_to(message, "No se pudo encontrar al usuario.")
+    else:
+        uid = destino
+
+    accumulated[remitente] -= dias
+    if accumulated[remitente] == 0:
+        accumulated.pop(remitente)
+    guardar_accumulated()
+
+    premium_users.append(int(uid))
+    guardar_premium()
+    premium_days[uid] = int(time.time()) + dias * 86400
+    guardar_premium_days()
+
+    try:
+        bot.send_message(int(uid), f"¡Has recibido {dias} día(s) premium de regalo!")
+    except: pass
+    bot.reply_to(message, f"Has enviado {dias} día(s) premium a {destino}.")
+
 # Resto de tu código original va debajo (no se modifica)
 # ...
 # (omito el resto aquí para que sea más claro el bloque agregado)
 
 @bot.message_handler(commands=['help'])
 def send_help(message):
-    help_msg = "Información:\nOwner: @dicksonpussylover\nProgramado con python en 2h Lmao\n@dicksonpussylover\n@LowQualityFamily\n\nLista de comandos:\n/start - Bienvenida\n/help - Este mensaje\n/premiumstatus - Verificar si eres usuario premium y cuantos días tienes\n/mystats - Muestra cuantos aportes has hecho al canal\n/referrals - Panel de referidos (5 referidos = 1 día premium)\n/canjear - Canjeas tus días premium almacenados\n/giftpremium - Regala tus días premium"
+    help_msg = "Información:\nOwner: @dicksonpussylover\nProgramado con python en 2h Lmao\n@dicksonpussylover\n@LowQualityFamily\n\nLista de comandos:\n/start - Bienvenida\n/help - Este mensaje"
     bot.reply_to(message, help_msg)
 
 # Comandos premium
