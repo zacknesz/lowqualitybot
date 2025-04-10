@@ -260,7 +260,7 @@ def gift_premium(message):
 
 @bot.message_handler(commands=['help'])
 def send_help(message):
-    help_msg = "Información:\nOwner: @dicksonpussylover\nProgramado con python en 2h Lmao\n@dicksonpussylover\n@LowQualityFamily\n\nLista de comandos:\n/start - Bienvenida\n/help - Este mensaje"
+    help_msg = "Información:\nOwner: @dicksonpussylover\nProgramado con python en 2h Lmao\n@dicksonpussylover\n@LowQualityFamily\n\nLista de comandos:\n/start - Bienvenida\n/help - Este mensaje\n/premiumstatus - Verificar si eres usuario premium y cuantos días tienes\n/mystats - Muestra cuantos aportes has hecho al canal\n/referrals - Panel de referidos (5 referidos = 1 día premium)\n/canjear - Canjeas tus días premium almacenados\n/giftpremium - Regala tus días premium"
     bot.reply_to(message, help_msg)
 
 # Comandos premium
