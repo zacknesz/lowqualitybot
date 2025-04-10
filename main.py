@@ -6,7 +6,7 @@ import json
 import os
 import time
 
-BOT_TOKEN = "TU_TOKEN_AQUI"
+BOT_TOKEN = "7745916264:AAFaxmVrQsqiEjq5yhq6BdDQ7wBKjjb4Gn8"
 bot = telebot.TeleBot(BOT_TOKEN)
 admin = -1001862368664
 owner_id = 7967939255
