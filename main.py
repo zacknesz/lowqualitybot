@@ -53,13 +53,17 @@ def verificar_expiraciones():
         for uid in expirados:
             if int(uid) in premium_users:
                 premium_users.remove(int(uid))
-                bot.send_message(int(uid), "Tu suscripción premium ha expirado.")
+                try:
+                    bot.send_message(int(uid), "Tu suscripción premium ha expirado.")
+                except:
+                    pass
+                guardar_premium()
         for uid in expirados:
             del premium_days[uid]
-        guardar_todo()
+        guardar_premium_days()
         time.sleep(60)
 
-threading.Thread(target=verificar_expiraciones).start()
+Thread(target=verificar_expiraciones).start()
 
 # Sesiones para edición de caption
 user_sessions = {}
