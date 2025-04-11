@@ -6,6 +6,7 @@ import threading
 import json
 import os
 import time
+from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 BOT_TOKEN = "7745916264:AAFaxmVrQsqiEjq5yhq6BdDQ7wBKjjb4Gn8"
 bot = telebot.TeleBot(BOT_TOKEN)
@@ -57,6 +58,77 @@ Thread(target=verificar_expiraciones).start()
 
 # Sesiones para edición de caption
 user_sessions = {}
+
+# Comando /panel (solo admin)
+@bot.message_handler(commands=['panel'])
+def admin_panel(message):
+    if message.from_user.id != owner_id:
+        return
+    markup = types.InlineKeyboardMarkup()
+    markup.add(types.InlineKeyboardButton("📄 Ver listas", callback_data='ver_listas'))
+    markup.add(types.InlineKeyboardButton("📢 Enviar broadcast", callback_data='broadcast_inicio'))
+    bot.send_message(message.chat.id, "Panel de administrador:", reply_markup=markup)
+
+# Callback para el panel
+@bot.callback_query_handler(func=lambda call: True)
+def panel_callbacks(call):
+    if call.from_user.id != owner_id:
+        return
+
+    if call.data == 'ver_listas':
+        datos = {
+            'Premium': premium_users,
+            'PremiumDays': premium_days,
+            'Blacklist': blacklist,
+            'Stats': stats,
+            'Referrals': referrals,
+            'Accumulated': accumulated
+        }
+
+        texto = "**Listas del bot:**\n\n"
+        for nombre, data in datos.items():
+            if not data:
+                texto += f"• {nombre}: Vacía\n"
+            else:
+                texto += f"• {nombre}: {len(data)} elementos\n"
+        markup = types.InlineKeyboardMarkup()
+        markup.add(types.InlineKeyboardButton("⬅ Volver", callback_data='volver_panel'))
+        bot.edit_message_text(chat_id=call.message.chat.id, message_id=call.message.message_id,
+                              text=texto, reply_markup=markup, parse_mode="Markdown")
+
+    elif call.data == 'broadcast_inicio':
+        broadcast_state[call.from_user.id] = True
+        bot.send_message(call.message.chat.id, "Envía el mensaje que deseas reenviar a todos los usuarios registrados.")
+
+    elif call.data == 'volver_panel':
+        admin_panel(call.message)
+
+# Broadcast: espera mensaje
+broadcast_state = {}
+
+@bot.message_handler(func=lambda m: m.from_user.id in broadcast_state)
+def handle_broadcast(m):
+    if m.from_user.id != owner_id:
+        return
+
+    del broadcast_state[m.from_user.id]
+    bloqueados = 0
+    enviados = 0
+    for uid in users:
+        try:
+            if m.content_type == "text":
+                bot.send_message(uid, m.text, parse_mode="Markdown")
+            elif m.content_type in ["photo", "video", "document", "audio", "animation", "voice"]:
+                file_id = getattr(m, m.content_type).file_id
+                send_func = getattr(bot, f"send_{m.content_type}")
+                send_func(uid, file_id, caption=m.caption or "", parse_mode="Markdown")
+            else:
+                continue
+            enviados += 1
+        except:
+            bloqueados += 1
+
+    bot.send_message(m.chat.id, f"✅ Mensaje reenviado a {enviados} usuarios.\n❌ Usuarios bloqueados: {bloqueados}")
 
 # Comando /start con sistema de referidos
 @bot.message_handler(commands=['start'])
@@ -204,6 +276,63 @@ def send_help(message):
     bot.reply_to(message, help_msg)
 
 # Comandos premium
+
+@bot.message_handler(commands=['addreferrals'])
+def admin_add_referrals(message):
+    if message.from_user.id != owner_id:
+        return bot.reply_to(message, "No tienes permiso.")
+    try:
+        parts = message.text.split()
+        uid = str(int(parts[1]))
+        cantidad = int(parts[2])
+        referrals[uid] = referrals.get(uid, 0) + cantidad
+        guardar_referrals()
+        bot.reply_to(message, f"{cantidad} referidos añadidos a {uid}")
+    except:
+        bot.reply_to(message, "Uso correcto: /addreferrals user_id cantidad")
+
+@bot.message_handler(commands=['removereferrals'])
+def admin_remove_referrals(message):
+    if message.from_user.id != owner_id:
+        return bot.reply_to(message, "No tienes permiso.")
+    try:
+        parts = message.text.split()
+        uid = str(int(parts[1]))
+        cantidad = int(parts[2])
+        referrals[uid] = max(referrals.get(uid, 0) - cantidad, 0)
+        guardar_referrals()
+        bot.reply_to(message, f"{cantidad} referidos removidos de {uid}")
+    except:
+        bot.reply_to(message, "Uso correcto: /removereferrals user_id cantidad")
+
+@bot.message_handler(commands=['adddays'])
+def admin_add_days(message):
+    if message.from_user.id != owner_id:
+        return bot.reply_to(message, "No tienes permiso.")
+    try:
+        parts = message.text.split()
+        uid = str(int(parts[1]))
+        cantidad = int(parts[2])
+        accumulated[uid] = accumulated.get(uid, 0) + cantidad
+        guardar_accumulated()
+        bot.reply_to(message, f"{cantidad} días añadidos a {uid}")
+    except:
+        bot.reply_to(message, "Uso correcto: /adddays user_id cantidad")
+
+@bot.message_handler(commands=['removedays'])
+def admin_remove_days(message):
+    if message.from_user.id != owner_id:
+        return bot.reply_to(message, "No tienes permiso.")
+    try:
+        parts = message.text.split()
+        uid = str(int(parts[1]))
+        cantidad = int(parts[2])
+        accumulated[uid] = max(accumulated.get(uid, 0) - cantidad, 0)
+        guardar_accumulated()
+        bot.reply_to(message, f"{cantidad} días removidos de {uid}")
+    except:
+        bot.reply_to(message, "Uso correcto: /removedays user_id cantidad")
+
 @bot.message_handler(commands=['addpremium'])
 def add_premium(message):
     if message.from_user.id != owner_id: return
