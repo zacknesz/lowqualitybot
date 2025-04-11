@@ -6,6 +6,7 @@ import threading
 import json
 import os
 import time
+import datetime
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 BOT_TOKEN = "7745916264:AAFaxmVrQsqiEjq5yhq6BdDQ7wBKjjb4Gn8"
@@ -106,8 +107,10 @@ def panel_callbacks(call):
 # Broadcast: espera mensaje
 broadcast_state = {}
 
-@bot.message_handler(func=lambda m: m.from_user.id in broadcast_state)
+@bot.message_handler(func=lambda m: m.chat.id == owner_id and m.reply_to_message and m.reply_to_message.text == "Escribe el mensaje que quieres enviar a todos los usuarios:")
 def handle_broadcast(m):
+    if not users:
+        return bot.reply_to(m, "No hay usuarios registrados para enviar el mensaje.")
     if m.from_user.id != owner_id:
         return
 
@@ -130,7 +133,6 @@ def handle_broadcast(m):
 
     bot.send_message(m.chat.id, f"✅ Mensaje reenviado a {enviados} usuarios.\n❌ Usuarios bloqueados: {bloqueados}")
 
-# Comando /start con sistema de referidos
 @bot.message_handler(commands=['start'])
 def registrar_usuario(message):
     uid = message.from_user.id
@@ -150,9 +152,11 @@ def registrar_usuario(message):
         if int(referidor) in blacklist:
             bot.reply_to(message, "Este referidor no es válido.")
             return
+
         referrals[str(uid)] = referidor
         guardar_referrals()
 
+        # Sumar al referidor
         accumulated[referidor] = accumulated.get(referidor, 0) + 1
         guardar_accumulated()
 
@@ -160,13 +164,24 @@ def registrar_usuario(message):
         if total % 5 == 0:
             premium_users.append(int(referidor))
             guardar_premium()
-            premium_days[referidor] = int(time.time()) + 86400  # 1 día
+            premium_days[referidor] = int(time.time()) + 86400
             guardar_premium_days()
             try:
                 bot.send_message(int(referidor), "¡Has recibido 1 día de premium por tus referidos!")
             except: pass
 
-    bot.reply_to(message, "¡Bienvenido al bot!")
+        # Dar al nuevo usuario 1 día de premium como prueba
+        if int(uid) not in premium_users:
+        	premium_users.append(int(uid))
+        	guardar_premium()
+        guardar_premium()
+        premium_days[str(uid)] = int(time.time()) + 86400
+        guardar_premium_days()
+        try:
+            bot.send_message(uid, "¡Has recibido 1 día de premium como regalo por registrarte con un referido!")
+        except: pass
+
+    bot.reply_to(message, f"Bienvenido @{message.from_user.username}\nEnvia un meme y será enviado al canal\n@LowQualityFamily")
 
 # /referrals
 @bot.message_handler(commands=['referrals'])
@@ -189,7 +204,9 @@ def canjear_dias(message):
         if dias == 0:
             bot.reply_to(message, "No tienes días premium acumulados.")
             return
-        premium_users.append(int(uid))
+        if int(uid) not in premium_users:
+        	premium_users.append(int(uid))
+        	guardar_premium()
         guardar_premium()
         premium_days[uid] = int(time.time()) + dias * 86400
         accumulated.pop(uid)
@@ -201,7 +218,9 @@ def canjear_dias(message):
             n = int(args[1])
             if n <= 0 or dias < n:
                 return bot.reply_to(message, "No tienes suficientes días.")
-            premium_users.append(int(uid))
+            if int(uid) not in premium_users:
+            	premium_users.append(int(uid))
+            	guardar_premium()
             guardar_premium()
             premium_days[uid] = int(time.time()) + n * 86400
             accumulated[uid] -= n
@@ -216,10 +235,10 @@ def canjear_dias(message):
 # /premiumstatus
 @bot.message_handler(commands=['premiumstatus'])
 def estado_premium(message):
-    uid = str(message.from_user.id)
-    if int(uid) in premium_users:
-        dias_restantes = max((premium_days.get(uid, 0) - int(time.time())) // 86400, 0)
-        bot.reply_to(message, f"Eres usuario premium.\nDías restantes: {dias_restantes}")
+    user_id = str(message.from_user.id)
+    if user_id in premium_users:
+        dias = premium_days.get(user_id, 0)
+        bot.reply_to(message, f"Eres usuario premium.\nDías restantes: {dias}")
     else:
         bot.reply_to(message, "No eres usuario premium.")
 
@@ -256,7 +275,9 @@ def regalar_premium(message):
         accumulated.pop(remitente)
     guardar_accumulated()
 
-    premium_users.append(int(uid))
+    if int(uid) not in premium_users:
+    	premium_users.append(int(uid))
+    	guardar_premium()
     guardar_premium()
     premium_days[uid] = int(time.time()) + dias * 86400
     guardar_premium_days()
@@ -270,26 +291,74 @@ def regalar_premium(message):
 # ...
 # (omito el resto aquí para que sea más claro el bloque agregado)
 
+@bot.message_handler(commands=['sugerencia'])
+def recibir_sugerencia(message):
+    texto = message.text.replace("/sugerencia", "").strip()
+    if not texto:
+        bot.reply_to(message, "Por favor, escribe tu sugerencia luego del comando.\nEjemplo: /sugerencia Podrían agregar más funciones divertidas.")
+        return
+
+    user = message.from_user
+    uid = user.id
+    username = user.username or "Sin username"
+    nombre_link = f"[{user.first_name}](tg://user?id={uid})"
+    mensaje = f"**Nueva sugerencia recibida:**\n\n"
+    mensaje += f"• Usuario: {nombre_link}\n"
+    mensaje += f"• ID: `{uid}`\n"
+    mensaje += f"• Username: @{username if username != 'Sin username' else 'N/A'}\n"
+    mensaje += f"• Mensaje:\n`{texto}`"
+
+    try:
+        bot.send_message(owner_id, mensaje, parse_mode="Markdown")
+        bot.reply_to(message, "¡Gracias por tu sugerencia! Ha sido enviada al administrador.")
+    except Exception as e:
+        bot.reply_to(message, f"No se pudo enviar la sugerencia. {e}")
+        bot.send_message(owner_id, f"Error: {e}\n Provocado por {message.from_user.id}")
+
+@bot.message_handler(commands=['apelacion'])
+def enviar_apelacion(message):
+    uid = message.from_user.id
+    args = message.text.split(maxsplit=1)
+    if len(args) == 1:
+        return bot.reply_to(message, "Por favor escribe tu apelación después del comando.\nEjemplo:\n`/apelacion Fui baneado injustamente.`", parse_mode="Markdown")
+
+    apelacion = args[1]
+    username = message.from_user.username
+    nombre = f"[{message.from_user.first_name}](tg://user?id={uid})"
+
+    texto = (
+        f"**Nueva apelación recibida:**\n\n"
+        f"• Usuario: @{username}\n"
+        f"• Apelación:\n`{apelacion}`" if username else f"**Nueva apelación recibida:**\n\n"
+        f"• Usuario: {nombre}"
+        f"\n• ID: `{uid}`\n"
+        f"• Apelación:\n`{apelacion}`"
+        )
+    
+    try:
+        bot.send_message(owner_id, texto, parse_mode="Markdown")
+        bot.reply_to(message, "Tu apelación fue enviada al administrador.\nEn todo caso se recomienda contactar al administrador: @zacknezzz")
+    except:
+        bot.reply_to(message, "Ocurrió un error al enviar tu apelación.")
+                   
 @bot.message_handler(commands=['help'])
 def send_help(message):
-    help_msg = "Información:\nOwner: @dicksonpussylover\nProgramado con python en 2h Lmao\n@dicksonpussylover\n@LowQualityFamily\n\nLista de comandos:\n/start - Bienvenida\n/help - Este mensaje"
+    help_msg = "Información:\nOwner: @LowQualityFamily\nLista de comandos:\n/start - Bienvenida\n/help - Este mensaje\n/premiumstatus - Tu estado actual\n/referrals - Tus referidos\n/canjear - Canjear tus días premium acumulados\n/giftpremium - Regalar tus días premium\n/sugerencia - Sugierenos algo!\n/apelacion - Apela alguna indiferencia experimentada con el bot"
     bot.reply_to(message, help_msg)
 
 # Comandos premium
 
 @bot.message_handler(commands=['addreferrals'])
-def admin_add_referrals(message):
-    if message.from_user.id != owner_id:
-        return bot.reply_to(message, "No tienes permiso.")
+def add_referrals(message):
+    if message.from_user.id != owner_id: return
     try:
-        parts = message.text.split()
-        uid = str(int(parts[1]))
-        cantidad = int(parts[2])
-        referrals[uid] = referrals.get(uid, 0) + cantidad
-        guardar_referrals()
-        bot.reply_to(message, f"{cantidad} referidos añadidos a {uid}")
+        uid = str(message.text.split()[1])
+        cantidad = int(message.text.split()[2])
+        accumulated[uid] = accumulated.get(uid, 0) + cantidad
+        guardar_accumulated()
+        bot.reply_to(message, f"{cantidad} referidos añadidos a {uid}.")
     except:
-        bot.reply_to(message, "Uso correcto: /addreferrals user_id cantidad")
+        bot.reply_to(message, "Uso: /addreferrals user_id cantidad")
 
 @bot.message_handler(commands=['removereferrals'])
 def admin_remove_referrals(message):
@@ -341,7 +410,9 @@ def add_premium(message):
         if uid in premium_users:
             bot.reply_to(message, "Este usuario ya es premium.")
         else:
-            premium_users.append(uid)
+            if int(uid) not in premium_users:
+            	premium_users.append(int(uid))
+            	guardar_premium()
             guardar_premium()
             bot.reply_to(message, f"Usuario {uid} añadido como premium.")
     except:
@@ -450,10 +521,21 @@ def my_stats(message):
         f"• Usuario: [@{username}](tg://user?id={uid})\n"
         f"• Aportes enviados: `{count}`\n"
     )
+
     if int(uid) in premium_users:
-        text += "\n**Estado:** Usuario Premium"
+        text += f"\n**Estado:** Usuario Premium"
     else:
-        text += "\n**Estado:** Usuario Normal"
+        text += f"\n**Estado:** Usuario Normal"
+
+    # Mostrar días acumulados si existen
+    dias = accumulated.get(uid, 0)
+    if dias > 0:
+        text += f"\n• Días premium acumulados: `{dias}`"
+
+    # Mostrar progreso hacia nueva recompensa
+    restante = 100 - (count % 100)
+    if restante != 100:
+        text += f"\n• Te faltan `{restante}` aportes para ganar +3 días premium"
     bot.reply_to(message, text, parse_mode="Markdown")
 
 # Confirmaciones /empty, /default o caption personalizado
@@ -508,7 +590,7 @@ def reenviar_aporte(uid):
         bot.send_message(uid, "Post enviado, verifica @LowQualityFamily")
 
     except Exception as e:
-        bot.send_message(uid, f"Error al reenviar: {e}")
+        bot.send_message(owner_id, f"Error al reenviar: {e}\nUsuario que lo provocó: " + uid)
 
 # Manejo general
 @bot.message_handler(content_types=['text','photo','video','document','audio','voice','sticker','video_note','animation'])
@@ -520,6 +602,13 @@ def handle_media(message):
     uid = str(user.id)
     stats[uid] = stats.get(uid, 0) + 1
     guardar_stats()
+    # Recompensa por cada 100 aportes
+    if stats[uid] % 100 == 0:
+        accumulated[uid] = accumulated.get(uid, 0) + 3
+        guardar_accumulated()
+        try:
+            bot.send_message(user.id, "¡Felicidades! Has recibido 3 días premium por llegar a 100 aportes.")
+        except: pass
 
     media_type = message.content_type
 
@@ -553,7 +642,8 @@ def handle_media(message):
             else:
                 bot.send_message(message.chat.id, "Ese tipo de archivo no es permitido.")
         except Exception as e:
-            bot.send_message(message.chat.id, f"Ocurrió un error: {e}")
+            bot.send_message(owner_id, f"Ocurrió un error: {e}\nUsuario que lo provocó {message.from_user.id}")
+            	
     else:
         try:
             post_from = f"Aporte de [{user.first_name}](tg://user?id={user.id}):"
@@ -577,7 +667,7 @@ def handle_media(message):
                 return
             bot.send_message(message.chat.id, "Post enviado, verifica @LowQualityFamily")
         except Exception as e:
-            bot.send_message(message.chat.id, f"Ocurrió un error: {e}")
+            bot.send_message(owner_id, f"Ocurrió un error: {e}\nUsuario que lo provocó {message.from_user.id}")
 
 # Web obligatoria para Koyeb
 app = Flask(__name__)
